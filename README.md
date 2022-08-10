@@ -30,7 +30,12 @@ conda activate airflow_mlflow
 pip install mlflow
 ````
 
-You can obviously find a more creative name for the environment if you like. Easy right? Well that is almost everything you need to get started. To test it, you can run the sample file (stolen from the official documentation) *first_test.py*, then type *mlflow ui* in your terminal (the conda environment needs to be activated as well) and copy the link that is shown. In my case, I accessed the UI via *localhost:5000*.
+You can obviously find a more creative name for the environment if you like. Easy right? Well that is almost everything you need to get started. 
+
+
+### Minimal Example
+
+To test it, you can run the sample file *first_test.py* to store the metrics and parameters, then type *mlflow ui* in your terminal (the conda environment needs to be activated as well) and copy the link that is shown. In my case, I accessed the UI via *http://localhost:5000*.
 
 By looking at the code, you can already see how it works. The metrics (things like accuracy) and parameters (things like number of neurons in a layer of your Neural Network) are stored in the respective columns. This shows quite well, how you can trace back which parameters gave you the best results. Finally, you can also store an artifact, in this case a simple *.txt* file.
 
@@ -43,8 +48,6 @@ By looking at the code, you can already see how it works. The metrics (things li
 The processes in every company can get pretty complicated so the workflows in your projects can become quite overwhelming. Whether it's loading the data from differenct sources, pre-processing it, training the model, passing necessary tests etc., most processes have to follow a strict order and not doing this might lead to bad results. To not lose track of these steps and to automate the entire pipeline, airbnb developed [Airflow](https://airflow.apache.org). 
 
 In Airflow you design so-called directed acyclic graphs - or DAGs. These graphs describe the dependencies of each step in your project. For example, if you don't have the data, you cannot train your model or if you don't pass important tests, you cannot deploy it. Airflow allows you to design these DAGs in a way that the model won't be trained if the data import fails, similar to the deployment that is stopped if the tests fail. The big advantage of Airflow is that it simplifies these steps enourmously while having a useful interface.
-
-Using CronJobs, you can schedule your pipelines on a regular basis, so you won't have to worry about this.
 
 
 ### Getting started with Airflow
@@ -78,21 +81,69 @@ Okay, we are all set! That wasn't too hard, was it? Now, to initialize the airfl
 
 ```
 docker-compose up airflow-init
-````
+```
 
 and wait a little bit. This command initializes Airflow with the user *airflow* and password *airflow*. If you want to use it in your company, this user is not recommended for obvious reasons. You can change this in lines 236 and 237 of the **docker-compose**. Then run
 
 ```
 docker-compose up
-````
+```
 
 which starts all the services defined in the docker-compose and your container should be up and running! You can access the webservice with the url "http://localhost/8080". Port 8080 is default for Airflow. If you want to use a different one, you can change it in lines 104 and 106.
 
-*Note: One of the errors that you can run into is the WorkerLostError('Could not start worker processes',). I solved this by assigning more memory to the Docker container. This can be done in your Docker Desktop Application under Settings*
+*Note: One of the errors that you can run into is the WorkerLostError('Could not start worker processes',). I solved this by assigning more memory to the Docker container. This can be done in your Docker Desktop Application under Settings.*
+
+In order to run a script that uses airflow, you need to run 
+
+```
+pip install 'apache-airflow==2.3.3' \
+ --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.3.3/constraints-3.7.txt"
+```
+in your environment and we are all set! There could be a newer version of Airflow running, you can find it on their [Github](https://github.com/apache/airflow).
+
+### Simple Airflow Example
+
+As I explained earlier, Airflow helps you to schedule tasks. I our example, the task doesn't really matter, so we simply square some numbers, to see how to use it. However, we want to do that on a regular basis, so we schedule this task with Airflow.
+
+Look at the script **example_dag.py** in the airflow folder. That file simply describes a DAG and nothing else. All functions that are called are in a different script and imported.
+
+The first step that we are taking here is defining parameters. The *default_args*-dictionary is later passed when creating the DAG. All parameters in here are applied to each operater that is part of the DAG (unless they are overwritten in the operator). Here we can define the number of retries, what happens on failure, etc.
+
+Then we define our DAG. As I've explained briefly before, a **directed acyclic graph** is a structure that contains different operators that depend on each other and are therefore exetued only when all dependencies are fulfilled. The *acyclic* part simply means that we cannot go back and execute a task again, there is a clear beginning and ending, no loop.
+
+I defined the schedule interval outside because I wanted to explain it in a little more detail. We could define it either with a timedelta from the datetime package. Then the DAG is called whenever the defined time period passes. For example:
+
+```
+schedule_interval=timedelta(days=1)
+schedule_interval=timedelta(hours=6)
+```
+
+However, the more common way is to use cronjobs. Cronjobs have a little strange notation that is a string consisting of 5 numbers (or placeholders). The first number describes the minute, the second the hour, then the day, the month and finally day of the week. If the third number is 3, then it is executed on each 3rd day od the month, if the second number is 0, it is executed on midnight. If the final number has a placeholder (a *) it is executed on each day of the week. A few examples:
+
+```
+schedule_interval = '0 5 * * *'  # each day, 5AM
+schedule_interval = '0 5 1 * *'  # 1st day of each month, 5AM
+schedule_interval = '0 5 * * 1'  # every Monday at 5AM
+schedule_interval = '30 * * 0 *'  # every half hour on every day in January
+```
+Instead of Cronjobs, Airflow allows you to use tags such as '@hourly'. Read more about this [here](https://airflow.apache.org/docs/apache-airflow/1.10.1/scheduler.html).
+
+Now, let's define our DAG simply with
+
+```
+dag = DAG(
+    # parameters such as name, args, etc.
+)
+```
+There is really not much more to say. The parameters can get a little mor complicated, depending on your tasks.
+
+Finally, let's create the operators. There are a bunch of different ones, here we are using the PythonOperator (to run a Python script) and some BashOperators. The PythonOperator calls the function via the keyword **python_callable**. The parameters for this function are passed via the **op_kwargs** argument. The BashOperators print out a message via *echo* and the final task shuts everything down.
+
+The last line in this code defines the order and direction of the graph. The arrows ">>" define which tasks comes after which.
 
 
+### Checking whether it worked
 
-## Project Overview
+If you save your python file in the dags folder, it should automatically be seen by Airflow. While your container is running (*docker-compose up* in case you forgot) you can open the web interface, which should be something like *http://localhost:8080/home#*. If your file worked, you should see it in the DAGs tab. 
 
-Both of these tools are quite powerful, and explaining in detail what they can do would require more than one repository - a lot more. Instead, I would like to give you an overview of some of the most important features, so you can get started and implement these tools in your own project. Stay tuned!
-
+![an image of Airflows's user interface](images/airflow_ui.png)
